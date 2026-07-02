@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">
+<meta name="referrer" content="no-referrer">
+<title>精密タイマー / ストップウォッチ</title>
+<style>
+  :root{
+    --bg: #0B0E0C;
+    --panel: #12160F;
+    --panel-line: #23291F;
+    --led: #3DFF9A;
+    --led-dim: #1B5C40;
+    --amber: #E8A33D;
+    --amber-dim: #6B4E1E;
+    --danger: #FF5C4D;
+    --text: #E9EDE6;
+    --muted: #6E7568;
+  }
+
+  *{ box-sizing: border-box; }
+
+  html, body{
+    margin:0; padding:0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', 'Menlo', 'Consolas', 'Courier New', monospace;
+    min-height: 100vh;
+  }
+
+  body{
+    background-image:
+      linear-gradient(var(--panel-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--panel-line) 1px, transparent 1px);
+    background-size: 28px 28px;
+    padding: 32px 12px;
+  }
+
+  .app{ width:min(94vw, 760px); margin:0 auto; }
+
+  .mode-switch-row{ display:flex; justify-content:center; margin-bottom:20px; }
+  #modeToggleBtn{ flex:none; padding:10px 20px; font-size:11px; }
+
+  .view[hidden]{ display:none; }
+
+  .cd-wrap, .cu-wrap{ max-width:480px; margin:0 auto; }
+  /* カウントアップ表示時は左右に広げるためラップを上書き */
+  .appHasCountup .cu-wrap { max-width: 100%; }
+
+  .instrument{
+    background: var(--panel);
+    border: 1px solid var(--panel-line);
+    border-radius: 6px;
+    padding: 28px 24px 22px;
+    box-shadow: 0 0 0 1px #000, 0 20px 60px rgba(0,0,0,0.55);
+  }
+
+  .label-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom: 18px; }
+  .eyebrow{ font-size: 11px; letter-spacing: 0.22em; color: var(--muted); text-transform: uppercase; }
+
+  .status-dot{ width: 8px; height:8px; border-radius:50%; background: var(--muted); transition: all .15s ease; }
+  .status-dot.running{ background: var(--led); box-shadow: 0 0 8px var(--led), 0 0 16px var(--led); }
+  .status-dot.alert{ background: var(--danger); box-shadow: 0 0 8px var(--danger), 0 0 16px var(--danger); animation: pulse 0.6s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ opacity: 1; } 50%{ opacity: 0.35; } }
+
+  .display{
+    display:flex; align-items:baseline; justify-content:center; gap: 2px;
+    padding: 18px 0 6px;
+    border-top: 1px solid var(--panel-line);
+    border-bottom: 1px solid var(--panel-line);
+    margin-bottom: 10px;
+    user-select: none;
+    flex-wrap: wrap;
+  }
+  .display .digits{
+    font-size: clamp(30px, 8.5vw, 46px);
+    letter-spacing: 1px;
+    color: var(--led);
+    text-shadow: 0 0 10px var(--led-dim), 0 0 2px var(--led);
+    font-variant-numeric: tabular-nums;
+  }
+  .display.overtime .digits{ color: var(--danger); text-shadow: 0 0 12px rgba(255,92,77,0.55); }
+  .display .ms{ font-size: clamp(16px, 4.4vw, 22px); color: var(--amber); opacity: 0.9; margin-left: 3px; font-variant-numeric: tabular-nums; }
+  .display .ms.fine{ color: var(--amber); opacity: 0.6; font-size: clamp(13px, 3.6vw, 17px); }
+  .display.overtime .ms{ color: var(--danger); opacity: 0.85; }
+
+  .total-elapsed{ text-align:center; font-size:11px; color: var(--danger); letter-spacing:.06em; margin: 0 0 16px; }
+  .total-elapsed[hidden]{ display:none; }
+
+  .set-row{ display:flex; align-items:flex-end; justify-content:center; gap:6px; margin-bottom: 8px; }
+  .field{ display:flex; flex-direction:column; align-items:center; gap: 6px; }
+  .field label{ font-size: 10px; letter-spacing: 0.14em; color: var(--muted); text-transform: uppercase; }
+  .field input{
+    width: 58px; background: #0E110D; border: 1px solid var(--panel-line); color: var(--text);
+    font-family: inherit; font-size: 17px; text-align:center; padding: 8px 4px; border-radius: 3px;
+    font-variant-numeric: tabular-nums;
+  }
+  .field input:focus{ outline: none; border-color: var(--led-dim); }
+  .field input.dirty{ border-color: var(--amber); box-shadow: 0 0 0 1px var(--amber-dim); }
+  .field input:disabled{ opacity: 0.4; }
+  .field span.unit{ font-size: 9px; color: var(--muted); }
+
+  .side-field{ overflow:hidden; max-width:0; opacity:0; transition:max-width .2s ease, opacity .15s ease; }
+  .side-field.open{ max-width:90px; opacity:1; }
+
+  .arrow-btn{ width:34px; height:44px; padding:0; font-size:15px; flex:none; }
+
+  .set-caption{ text-align:center; font-size:9px; color: var(--muted); margin: 2px 0 8px; letter-spacing:.02em; line-height:1.5; }
+
+  .confirm-hint{
+    text-align:center; font-size: 11px; color: var(--amber); letter-spacing: 0.04em;
+    min-height: 15px; margin-bottom: 4px; opacity: 0; transition: opacity .15s ease;
+  }
+  .confirm-hint.show{ opacity: 1; }
+
+  .controls{ display:flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  button{
+    flex:1; font-family: inherit; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 12px 8px; border-radius: 3px; border: 1px solid var(--panel-line);
+    background: #14180F; color: var(--text); cursor: pointer;
+    transition: border-color .15s ease, color .15s ease;
+    min-width: 70px;
+  }
+  button:hover{ border-color: var(--muted); }
+  button:active{ transform: translateY(1px); }
+  button.primary{ color: var(--led); border-color: var(--led-dim); }
+  button.primary:hover{ border-color: var(--led); }
+  button.danger{ color: var(--danger); }
+  button:disabled{ opacity: 0.35; cursor: default; }
+
+  .cu-hint-row { text-align: center; font-size: 11px; color: var(--amber); margin-top: 8px; min-height: 15px; opacity: 0; transition: opacity 0.15s ease; }
+  .cu-hint-row.show { opacity: 1; }
+
+  .space-row{ display:flex; justify-content:center; margin-top: 14px; }
+  .space-pill{ display:flex; align-items:center; gap: 10px; padding: 8px 14px; border: 1px solid var(--panel-line); border-radius: 20px; font-size: 11px; letter-spacing: 0.1em; color: var(--muted); }
+  .space-key{ border: 1px solid var(--panel-line); border-radius: 3px; padding: 3px 10px; color: var(--text); font-size: 10px; }
+  .space-switch{ width: 30px; height: 16px; border-radius: 10px; background: #0E110D; border: 1px solid var(--panel-line); position: relative; transition: border-color .15s ease; }
+  .space-switch .knob{ position:absolute; top: 1px; left: 1px; width: 12px; height: 12px; border-radius: 50%; background: var(--muted); transition: all .15s ease; }
+  .space-switch.on{ border-color: var(--led-dim); }
+  .space-switch.on .knob{ left: 15px; background: var(--led); box-shadow: 0 0 6px var(--led); }
+
+  .elapsed-row{ display:flex; flex-direction:column; align-items:center; gap: 6px; margin-top: 14px; }
+  #elapsedModeBtn{ width: 100%; }
+  #elapsedModeBtn.on{ color: var(--danger); border-color: #6B2A22; }
+  .elapsed-caption{ font-size: 10px; letter-spacing: 0.14em; color: var(--muted); text-transform: uppercase; }
+
+  .log-panel{ margin-top:22px; border:1px solid var(--panel-line); border-radius:6px; padding:16px; background:var(--panel); }
+  .log-panel-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .log-panel-head h3{ margin:0; font-size:11px; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; font-weight:normal; }
+  .log-copy-btn{ flex:none; font-size:10px; padding:6px 10px; width:auto; min-width:0; }
+
+  .log-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:6px; }
+  .log-item{ display:flex; align-items:center; gap:8px; font-size:11px; padding:6px 8px; border:1px solid var(--panel-line); border-radius:3px; background:#0E110D; }
+  .log-item[hidden]{ display:none; }
+  .log-n{ color:var(--amber); flex:none; width:32px; font-variant-numeric:tabular-nums; }
+  .log-time{ flex:1; font-variant-numeric:tabular-nums; }
+  .log-item button{ flex:none; font-size:9px; padding:5px 8px; width:auto; min-width:0; }
+
+  .log-more-btn{ margin-top:8px; width:100%; font-size:10px; }
+  .log-empty{ color:var(--muted); font-size:11px; text-align:center; padding:8px 0; }
+
+  .countup-panels{ display:flex; gap:16px; margin-top:22px; flex-wrap:wrap; }
+  .countup-panels .log-panel{ flex:1 1 260px; margin-top:0; }
+
+  .lap-header{ font-size:11px; letter-spacing:.1em; color:var(--muted); text-transform:uppercase; }
+  .lap-total{ font-size:15px; color:var(--led); margin:4px 0 10px; font-variant-numeric:tabular-nums; }
+  .lap-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; max-height:220px; overflow-y:auto; }
+  .lap-item{ display:flex; gap:8px; font-size:10px; padding:5px 6px; border:1px solid var(--panel-line); border-radius:3px; }
+  .lap-n{ color:var(--amber); width:50px; flex:none; }
+  .lap-split{ flex:1; color:var(--text); }
+  .lap-cum{ color:var(--muted); }
+  .lap-empty{ color:var(--muted); font-size:11px; text-align:center; padding:8px 0; }
+  .lap-copy-row{ display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
+  .lap-copy-row button{ flex:1 1 auto; font-size:9px; padding:6px 6px; min-width:0; }
+</style>
+</head>
+<body>
+<div class="app" id="appContainer">
+
+  <div class="mode-switch-row">
+    <button id="modeToggleBtn" type="button">カウントアップモードに切替</button>
+  </div>
+
+  <div class="view cd-wrap" id="countdownView">
+    <div class="instrument">
+      <div class="label-row">
+        <span class="eyebrow">Precision Countdown</span>
+        <span class="status-dot" id="statusDotCD"></span>
+      </div>
+
+      <div class="display" id="displayCD">
+        <span class="digits" id="digitsCD">00:00:10</span><span class="ms" id="msCD">.00</span>
+      </div>
+      <div class="total-elapsed" id="totalElapsedRow" hidden>合計経過 <span id="totalElapsedText">00:00:00.00</span></div>
+
+      <div class="set-row">
+        <div class="side-field field" id="hourSlot">
+          <label for="inHour">時間</label>
+          <input type="text" id="inHour" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" spellcheck="false" value="00">
+          <span class="unit">H</span>
+        </div>
+        <button class="arrow-btn" id="leftToggleBtn" type="button" aria-expanded="false">←</button>
+        <div class="field">
+          <label for="inMin">分</label>
+          <input type="text" id="inMin" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" spellcheck="false" value="00">
+          <span class="unit">MIN</span>
+        </div>
+        <div class="field">
+          <label for="inSec">秒</label>
+          <input type="text" id="inSec" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" spellcheck="false" value="10">
+          <span class="unit">SEC</span>
+        </div>
+        <div class="field">
+          <label for="inCs">1/100秒</label>
+          <input type="text" id="inCs" inputmode="numeric" pattern="[0-9]*" maxlength="2" autocomplete="off" spellcheck="false" value="00">
+          <span class="unit">CS</span>
+        </div>
+        <button class="arrow-btn" id="rightToggleBtn" type="button" aria-expanded="false">→</button>
+        <div class="side-field field" id="fineSlot">
+          <label for="inFine">1/1000秒</label>
+          <input type="text" id="inFine" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="off" spellcheck="false" value="0">
+          <span class="unit">MS</span>
+        </div>
+      </div>
+      <div class="set-caption">← / → ボタンで時間や1/1000秒を展開・格納できます</div>
+
+      <div class="confirm-hint" id="confirmHintCD">⏎ Enterキーで確定してください</div>
+
+      <div class="controls">
+        <button class="primary" id="startBtnCD" type="button">開始</button>
+        <button id="pauseBtnCD" type="button" disabled>一時停止</button>
+        <button class="danger" id="resetBtnCD" type="button">リセット</button>
+      </div>
+
+      <div class="space-row">
+        <div class="space-pill">
+          <span class="space-key">SPACE</span>
+          <span>開始 / 一時停止</span>
+          <div class="space-switch" id="spaceSwitchCD"><div class="knob"></div></div>
+        </div>
+      </div>
+
+      <div class="elapsed-row">
+        <button id="elapsedModeBtn" type="button">経過時間表示: ON</button>
+        <div class="elapsed-caption">経過時間モード</div>
+      </div>
+    </div>
+
+    <div class="log-panel">
+      <div class="log-panel-head">
+        <h3>カウントダウン記録ログ</h3>
+        <button class="log-copy-btn" id="cdCopyAllBtn" type="button">全体をコピー</button>
+      </div>
+      <ul class="log-list" id="cdLogList"></ul>
+      <div class="log-empty" id="cdLogEmpty">まだ記録がありません</div>
+      <button class="log-more-btn" id="cdLogMoreBtn" type="button" hidden></button>
+    </div>
+  </div>
+
+  <div class="view cu-wrap" id="countupView" hidden>
+    <div class="instrument">
+      <div class="label-row">
+        <span class="eyebrow">Precision Stopwatch</span>
+        <span class="status-dot" id="statusDotCU"></span>
+      </div>
+
+      <div class="display" id="displayCU">
+        <span class="digits" id="digitsCU">00:00:00</span><span class="ms" id="csCU">.00</span><span class="ms fine" id="fineCU">.0</span>
+      </div>
+
+      <div class="controls">
+        <button class="primary" id="startBtnCU" type="button">開始</button>
+        <button id="pauseBtnCU" type="button" disabled>一時停止</button>
+        <button id="lapBtnCU" type="button" disabled>ラップ</button>
+        <button class="danger" id="resetBtnCU" type="button">リセット</button>
+      </div>
+
+      <div class="cu-hint-row" id="cuHintRow">⏎ Enterキーでもラップを記録できます</div>
+
+      <div class="space-row">
+        <div class="space-pill">
+          <span class="space-key">SPACE</span>
+          <span>開始 / 一時停止</span>
+          <div class="space-switch" id="spaceSwitchCU"><div class="knob"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="countup-panels" id="countupPanels" hidden>
+    <div class="log-panel">
+      <div class="log-panel-head">
+        <h3>カウントアップ タイムログ</h3>
+      </div>
+      <ul class="log-list" id="cuLogList"></ul>
+      <div class="log-empty" id="cuLogEmpty">まだ記録がありません</div>
+      <button class="log-more-btn" id="cuLogMoreBtn" type="button" hidden></button>
+    </div>
+
+    <div class="log-panel">
+      <div class="log-panel-head">
+        <h3>カウントアップ ラップログ</h3>
+      </div>
+      <div class="lap-header" id="lapHeader">ラップ</div>
+      <div class="lap-total" id="lapTotal">まだ記録がありません</div>
+      <ul class="lap-list" id="lapList"></ul>
+      <div class="lap-copy-row">
+        <button id="copyLogsOnlyBtn" type="button">ログのみコピー</button>
+        <button id="copyLapsOnlyBtn" type="button">ラップのみコピー</button>
+        <button id="copyBothBtn" type="button">両方コピー</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  /* ============================================================
+     shared helpers
+  ============================================================ */
+  function pad(n, len){ return String(n).padStart(len, '0'); }
+  function clamp(v, lo, hi){ return Math.max(lo, Math.min(hi, v)); }
+
+  function msParts(ms){
+    if (ms < 0 || !isFinite(ms)) ms = 0;
+    ms = Math.floor(ms);
+    const fine = ms % 10;
+    const cs = Math.floor(ms / 10) % 100;
+    const totalSeconds = Math.floor(ms / 1000);
+    const ss = totalSeconds % 60;
+    const totalMinutes = Math.floor(totalSeconds / 60);
+    const mm = totalMinutes % 60;
+    const hh = Math.floor(totalMinutes / 60);
+    return { hh, mm, ss, cs, fine };
+  }
+
+  function fmtHMSC(ms){
+    const p = msParts(ms);
+    return pad(p.hh,2)+':'+pad(p.mm,2)+':'+pad(p.ss,2)+'.'+pad(p.cs,2);
+  }
+  function fmtHMSCF(ms){
+    const p = msParts(ms);
+    return pad(p.hh,2)+':'+pad(p.mm,2)+':'+pad(p.ss,2)+'.'+pad(p.cs,2)+'.'+p.fine;
+  }
+
+  let audioCtx = null;
+  function unlockAudio(){
+    try{
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }catch(e){ /* audio unavailable, fail silently */ }
+  }
+  function playBeepAt(time){
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 1000;
+    gain.gain.setValueAtTime(0.0001, time);
+    gain.gain.exponentialRampToValueAtTime(0.18, time + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + 0.09);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(time);
+    osc.stop(time + 0.1);
+  }
+  function playAlarm(){
+    try{
+      unlockAudio();
+      if (!audioCtx) return;
+      const beepDur = 0.09, gapShort = 0.09, gapGroup = 0.25;
+      let t = audioCtx.currentTime + 0.02;
+      for (let g = 0; g < 3; g++){
+        playBeepAt(t); t += beepDur + gapShort;
+        playBeepAt(t); t += beepDur + gapGroup;
+      }
+    }catch(e){ /* fail silently, timer still works without sound */ }
+  }
+
+  function fallbackCopy(text){
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select();
+    let ok = false;
+    try{ ok = document.execCommand('copy'); }catch(e){ ok = false; }
+    document.body.removeChild(ta);
+    return ok;
+  }
+  function flashButton(btn, msg){
+    if (!btn) return;
+    const orig = btn.textContent;
+    btn.textContent = msg;
+    btn.disabled = true;
+    setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 1100);
+  }
+  function copyText(text, btn){
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text)
+        .then(() => flashButton(btn, 'コピーしました'))
+        .catch(() => { flashButton(btn, fallbackCopy(text) ? 'コピーしました' : 'コピー失敗'); });
+    } else {
+      flashButton(btn, fallbackCopy(text) ? 'コピーしました' : 'コピー失敗');
+    }
+  }
+
+  function setupField(input, confirmedObj, key, max, padLen, hintEl, onConfirm){
+    let dirty = false;
+    function setDirty(v){
+      if (v === dirty) return;
+      dirty = v;
+      input.classList.toggle('dirty', v);
+      hintEl.dirtyCount += v ? 1 : -1;
+      hintEl.el.classList.toggle('show', hintEl.dirtyCount > 0);
+    }
+    input.addEventListener('input', () => {
+      const filtered = input.value.replace(/[^0-9]/g, '');
+      if (filtered !== input.value) input.value = filtered;
+      setDirty(true);
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      let v = parseInt(input.value, 10);
+      if (isNaN(v)) v = 0;
+      v = clamp(v, 0, max);
+      confirmedObj[key] = v;
+      input.value = pad(v, padLen);
+      setDirty(false);
+      if (onConfirm) onConfirm();
+      input.blur();
+    });
+    input.addEventListener('blur', () => {
+      if (dirty){
+        input.value = pad(confirmedObj[key], padLen);
+        setDirty(false);
+      }
+    });
+  }
+
+  /* ============================================================
+     mode switching
+  ============================================================ */
+  let appMode = 'countdown';
+  const appContainer = document.getElementById('appContainer');
+  const modeToggleBtn = document.getElementById('modeToggleBtn');
+  const countdownView = document.getElementById('countdownView');
+  const countupView = document.getElementById('countupView');
+  const countupPanels = document.getElementById('countupPanels');
+
+  modeToggleBtn.addEventListener('click', () => {
+    appMode = (appMode === 'countdown') ? 'countup' : 'countdown';
+    countdownView.hidden = appMode !== 'countdown';
+    countupView.hidden = appMode !== 'countup';
+    countupPanels.hidden = appMode !== 'countup';
+    modeToggleBtn.textContent = appMode === 'countdown' ? 'カウントアップモードに切替' : 'カウントダウンモードに切替';
+    appContainer.classList.toggle('appHasCountup', appMode === 'countup');
+  });
+
+  /* ============================================================
+     COUNTDOWN MODE
+  ============================================================ */
+  const digitsCD = document.getElementById('digitsCD');
+  const msCD = document.getElementById('msCD');
+  const displayCD = document.getElementById('displayCD');
+  const statusDotCD = document.getElementById('statusDotCD');
+  const totalElapsedRow = document.getElementById('totalElapsedRow');
+  const totalElapsedText = document.getElementById('totalElapsedText');
+
+  const inHour = document.getElementById('inHour');
+  const inMin = document.getElementById('inMin');
+  const inSec = document.getElementById('inSec');
+  const inCs  = document.getElementById('inCs');
+  const inFine = document.getElementById('inFine');
+
+  const hourSlot = document.getElementById('hourSlot');
+  const fineSlot = document.getElementById('fineSlot');
+  const leftToggleBtn = document.getElementById('leftToggleBtn');
+  const rightToggleBtn = document.getElementById('rightToggleBtn');
+
+  const startBtnCD = document.getElementById('startBtnCD');
+  const pauseBtnCD = document.getElementById('pauseBtnCD');
+  const resetBtnCD = document.getElementById('resetBtnCD');
+  const confirmHintCD = document.getElementById('confirmHintCD');
+  const spaceSwitchCD = document.getElementById('spaceSwitchCD');
+  const elapsedModeBtn = document.getElementById('elapsedModeBtn');
+
+  const cdLogList = document.getElementById('cdLogList');
+  const cdLogEmpty = document.getElementById('cdLogEmpty');
+  const cdLogMoreBtn = document.getElementById('cdLogMoreBtn');
+  const cdCopyAllBtn = document.getElementById('cdCopyAllBtn');
+
+  const confirmedCD = { hour: 0, min: 0, sec: 10, cs: 0, fine: 0 };
+  const hintCD = { el: confirmHintCD, dirtyCount: 0 };
+
+  let phaseCD = 'idle'; // idle | countdown | overtime | stopped
+  let cdRunning = false;
+  let totalMsAtStart = 0;
+  let remainingMs = 0;
+  let overtimeBaseMs = 0;
+  let endTime = 0;
+  let overtimeStart = 0;
+  let rafCD = null;
+  let elapsedModeEnabled = true;
+
+  let cdLogs = [];
+  let cdLogCounter = 0;
+  let cdShowMore = false;
+
+  function confirmedTotalMsCD(){
+    return (confirmedCD.hour * 3600000) + (confirmedCD.min * 60000) + (confirmedCD.sec * 1000) + (confirmedCD.cs * 10) + confirmedCD.fine;
+  }
+  function setCountdownDigits(ms){
+    const p = msParts(ms);
+    digitsCD.textContent = pad(p.hh,2)+':'+pad(p.mm,2)+':'+pad(p.ss,2);
+    msCD.textContent = '.'+pad(p.cs,2);
+  }
+  function setOvertimeDigits(ms){
+    const p = msParts(ms);
+    digitsCD.textContent = '-'+pad(p.hh,2)+':'+pad(p.mm,2)+':'+pad(p.ss,2);
+    msCD.textContent = '.'+pad(p.cs,2);
+  }
+  function refreshIdleDisplayCD(){
+    if (phaseCD === 'idle') setCountdownDigits(confirmedTotalMsCD());
+  }
+
+  function setStatusCD(cls){
+    statusDotCD.classList.remove('running', 'alert');
+    if (cls) statusDotCD.classList.add(cls);
+  }
+  function setSpaceSwitchCD(on){ spaceSwitchCD.classList.toggle('on', on); }
+  function lockInputsCD(lock){
+    [inHour, inMin, inSec, inCs, inFine].forEach(el => { el.disabled = lock; });
+  }
+
+  function tickCD(){
+    if (!cdRunning) return;
+    const now = performance.now();
+    if (phaseCD === 'countdown'){
+      const left = endTime - now;
+      if (left <= 0){
+        setCountdownDigits(0);
+        onReachZero();
+        return;
+      }
+      setCountdownDigits(left);
+      rafCD = requestAnimationFrame(tickCD);
+      return;
+    }
+    if (phaseCD === 'overtime'){
+      const elapsed = now - overtimeStart;
+      setOvertimeDigits(elapsed);
+      totalElapsedText.textContent = fmtHMSC(totalMsAtStart + elapsed);
+      rafCD = requestAnimationFrame(tickCD);
+    }
+  }
+
+  function onReachZero(){
+    playAlarm();
+    if (elapsedModeEnabled){
+      phaseCD = 'overtime';
+      overtimeStart = performance.now();
+      overtimeBaseMs = 0;
+      displayCD.classList.add('overtime');
+      totalElapsedRow.hidden = false;
+      totalElapsedText.textContent = fmtHMSC(totalMsAtStart);
+      rafCD = requestAnimationFrame(tickCD);
+    } else {
+      finishStaticCD();
+    }
+  }
+
+  function finishStaticCD(){
+    cdRunning = false;
+    cancelAnimationFrame(rafCD);
+    phaseCD = 'stopped';
+    setStatusCD('alert');
+    setSpaceSwitchCD(false);
+    startBtnCD.disabled = true;
+    pauseBtnCD.disabled = true;
+    startBtnCD.textContent = '開始';
+  }
+
+  function computeElapsedForLogCD(){
+    if (phaseCD === 'countdown'){
+      const rem = cdRunning ? Math.max(0, endTime - performance.now()) : remainingMs;
+      return Math.max(0, totalMsAtStart - rem);
+    }
+    if (phaseCD === 'overtime'){
+      const ot = cdRunning ? (performance.now() - overtimeStart) : overtimeBaseMs;
+      return totalMsAtStart + ot;
+    }
+    if (phaseCD === 'stopped') return totalMsAtStart;
+    return 0;
+  }
+
+  function addCountdownLog(ms){
+    cdLogCounter++;
+    cdLogs.push({ n: cdLogCounter, totalMs: Math.max(0, ms) });
+    if (cdLogs.length > 10) cdLogs.shift();
+    renderCountdownLogs();
+  }
+
+  function cdEntryText(e){ return '#'+e.n+'  '+fmtHMSC(e.totalMs); }
+
+  function renderCountdownLogs(){
+    cdLogList.textContent = '';
+    const sorted = cdLogs.slice().reverse();
+    cdLogEmpty.hidden = sorted.length > 0;
+    sorted.forEach((entry, idx) => {
+      const li = document.createElement('li');
+      li.className = 'log-item';
+      if (idx >= 5) li.hidden = !cdShowMore;
+      const n = document.createElement('span');
+      n.className = 'log-n'; n.textContent = '#'+entry.n;
+      const t = document.createElement('span');
+      t.className = 'log-time'; t.textContent = fmtHMSC(entry.totalMs);
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button'; copyBtn.textContent = 'コピー';
+      copyBtn.addEventListener('click', () => copyText(cdEntryText(entry), copyBtn));
+      li.append(n, t, copyBtn);
+      cdLogList.appendChild(li);
+    });
+    if (sorted.length > 5){
+      cdLogMoreBtn.hidden = false;
+      cdLogMoreBtn.textContent = cdShowMore ? '過去のログを隠す' : ('過去のログを表示 (+'+Math.min(5, sorted.length-5)+')');
+    } else {
+      cdLogMoreBtn.hidden = true;
+    }
+  }
+
+  cdLogMoreBtn.addEventListener('click', () => {
+    cdShowMore = !cdShowMore;
+    renderCountdownLogs();
+  });
+
+  cdCopyAllBtn.addEventListener('click', () => {
+    if (cdLogs.length === 0){ flashButton(cdCopyAllBtn, '記録なし'); return; }
+    const text = cdLogs.map(cdEntryText).join('\n');
+    copyText(text, cdCopyAllBtn);
+  });
+
+  function startCD(){
+    if (cdRunning) return;
+    unlockAudio();
+    if (phaseCD === 'idle'){
+      const total = confirmedTotalMsCD();
+      if (total <= 0) return;
+      totalMsAtStart = total;
+      remainingMs = total;
+      phaseCD = 'countdown';
+    } else if (phaseCD === 'stopped'){
+      return;
+    }
+    if (phaseCD === 'countdown'){
+      endTime = performance.now() + remainingMs;
+    } else if (phaseCD === 'overtime'){
+      overtimeStart = performance.now() - overtimeBaseMs;
+      totalElapsedRow.hidden = false;
+    }
+    cdRunning = true;
+    lockInputsCD(true);
+    setStatusCD('running');
+    setSpaceSwitchCD(true);
+    startBtnCD.disabled = true;
+    pauseBtnCD.disabled = false;
+    pauseBtnCD.textContent = '一時停止';
+    rafCD = requestAnimationFrame(tickCD);
+  }
+
+  function pauseCD(){
+    if (!cdRunning) return;
+    cdRunning = false;
+    cancelAnimationFrame(rafCD);
+    const now = performance.now();
+    if (phaseCD === 'countdown'){
+      remainingMs = Math.max(0, endTime - now);
+    } else if (phaseCD === 'overtime'){
+      overtimeBaseMs = now - overtimeStart;
+    }
+    setStatusCD(null);
+    setSpaceSwitchCD(false);
+    startBtnCD.disabled = false;
+    startBtnCD.textContent = '再開';
+    pauseBtnCD.disabled = true;
+  }
+
+  function resetCD(){
+    cdRunning = false;
+    cancelAnimationFrame(rafCD);
+    if (phaseCD !== 'idle'){
+      addCountdownLog(computeElapsedForLogCD());
+    }
+    phaseCD = 'idle';
+    remainingMs = 0;
+    overtimeBaseMs = 0;
+    displayCD.classList.remove('overtime');
+    totalElapsedRow.hidden = true;
+    setStatusCD(null);
+    setSpaceSwitchCD(false);
+    lockInputsCD(false);
+    startBtnCD.disabled = false;
+    startBtnCD.textContent = '開始';
+    pauseBtnCD.disabled = true;
+    refreshIdleDisplayCD();
+  }
+
+  function toggleElapsedMode(){
+    elapsedModeEnabled = !elapsedModeEnabled;
+    elapsedModeBtn.classList.toggle('on', elapsedModeEnabled);
+    elapsedModeBtn.textContent = '経過時間表示: ' + (elapsedModeEnabled ? 'ON' : 'OFF');
+    if (!elapsedModeEnabled && phaseCD === 'overtime'){
+      finishStaticCD();
+      displayCD.classList.remove('overtime');
+      totalElapsedRow.hidden = true;
+      setCountdownDigits(0);
+    }
+  }
+
+  setupField(inHour, confirmedCD, 'hour', 99, 2, hintCD, refreshIdleDisplayCD);
+  setupField(inMin,  confirmedCD, 'min',  99, 2, hintCD, refreshIdleDisplayCD);
+  setupField(inSec,  confirmedCD, 'sec',  59, 2, hintCD, refreshIdleDisplayCD);
+  setupField(inCs,   confirmedCD, 'cs',   99, 2, hintCD, refreshIdleDisplayCD);
+  setupField(inFine, confirmedCD, 'fine',  9, 1, hintCD, refreshIdleDisplayCD);
+
+  leftToggleBtn.addEventListener('click', () => {
+    const open = !hourSlot.classList.contains('open');
+    hourSlot.classList.toggle('open', open);
+    leftToggleBtn.setAttribute('aria-expanded', String(open));
+    leftToggleBtn.textContent = open ? '→' : '←';
+  });
+  rightToggleBtn.addEventListener('click', () => {
+    const open = !fineSlot.classList.contains('open');
+    fineSlot.classList.toggle('open', open);
+    rightToggleBtn.setAttribute('aria-expanded', String(open));
+    rightToggleBtn.textContent = open ? '←' : '→';
+  });
+
+  startBtnCD.addEventListener('click', startCD);
+  pauseBtnCD.addEventListener('click', pauseCD);
+  resetBtnCD.addEventListener('click', resetCD);
+  elapsedModeBtn.addEventListener('click', toggleElapsedMode);
+
+  elapsedModeBtn.classList.add('on');
+  refreshIdleDisplayCD();
+  renderCountdownLogs();
+
+  /* ============================================================
+     COUNTUP MODE
+  ============================================================ */
+  const digitsCU = document.getElementById('digitsCU');
+  const csCU = document.getElementById('csCU');
+  const fineCU = document.getElementById('fineCU');
+  const statusDotCU = document.getElementById('statusDotCU');
+
+  const startBtnCU = document.getElementById('startBtnCU');
+  const pauseBtnCU = document.getElementById('pauseBtnCU');
+  const lapBtnCU = document.getElementById('lapBtnCU');
+  const resetBtnCU = document.getElementById('resetBtnCU');
+  const spaceSwitchCU = document.getElementById('spaceSwitchCU');
+  const cuHintRow = document.getElementById('cuHintRow');
+
+  const cuLogList = document.getElementById('cuLogList');
+  const cuLogEmpty = document.getElementById('cuLogEmpty');
+  const cuLogMoreBtn = document.getElementById('cuLogMoreBtn');
+
+  const lapHeader = document.getElementById('lapHeader');
+  const lapTotal = document.getElementById('lapTotal');
+  const lapList = document.getElementById('lapList');
+  const copyLogsOnlyBtn = document.getElementById('copyLogsOnlyBtn');
+  const copyLapsOnlyBtn = document.getElementById('copyLapsOnlyBtn');
+  const copyBothBtn = document.getElementById('copyBothBtn');
+
+  let cuPhase = 'idle'; // idle | running | paused
+  let cuRunning = false;
+  let cuStartTs = 0;
+  let cuBaseMs = 0;
+  let cuLaps = [];
+  let rafCU = null;
+
+  let cuLogs = [];
+  let cuLogCounter = 0;
+  let cuShowMore = false;
+  let selectedLapId = null;
+
+  function cuElapsed(){ return cuRunning ? (performance.now() - cuStartTs + cuBaseMs) : cuBaseMs; }
+  function setCountupDigits(ms){
+    const p = msParts(ms);
+    digitsCU.textContent = pad(p.hh,2)+':'+pad(p.mm,2)+':'+pad(p.ss,2);
+    csCU.textContent = '.'+pad(p.cs,2);
+    fineCU.textContent = '.'+p.fine;
+  }
+  function setStatusCU(cls){
+    statusDotCU.classList.remove('running');
+    if (cls) statusDotCU.classList.add(cls);
+  }
+  function setSpaceSwitchCU(on){ spaceSwitchCU.classList.toggle('on', on); }
+  function isLiveLapView(){ return cuPhase === 'running' || cuPhase === 'paused'; }
+
+  function tickCU(){
+    if (!cuRunning) return;
+    const e = cuElapsed();
+    setCountupDigits(e);
+    if (isLiveLapView()) lapTotal.textContent = '全体: ' + fmtHMSCF(e);
+    rafCU = requestAnimationFrame(tickCU);
+  }
+
+  function startCU(){
+    if (cuRunning) return;
+    if (cuPhase === 'idle'){
+      cuBaseMs = 0;
+      cuLaps = [];
+      cuPhase = 'running';
+      cuStartTs = performance.now();
+      selectedLapId = null;
+      renderLapPanel();
+    } else if (cuPhase === 'paused'){
+      cuStartTs = performance.now();
+      cuPhase = 'running';
+    }
+    cuRunning = true;
+    setStatusCU('running');
+    setSpaceSwitchCU(true);
+    cuHintRow.classList.add('show');
+    startBtnCU.disabled = true;
+    pauseBtnCU.disabled = false;
+    pauseBtnCU.textContent = '一時停止';
+    lapBtnCU.disabled = false;
+    rafCU = requestAnimationFrame(tickCU);
+  }
+
+  function pauseCU(){
+    if (!cuRunning) return;
+    cuRunning = false;
+    cancelAnimationFrame(rafCU);
+    cuBaseMs = cuElapsed();
+    cuPhase = 'paused';
+    setStatusCU(null);
+    setSpaceSwitchCU(false);
+    cuHintRow.classList.remove('show');
+    startBtnCU.disabled = false;
+    startBtnCU.textContent = '再開';
+    pauseBtnCU.disabled = true;
+    lapBtnCU.disabled = true;
+  }
+
+  function lapCU(){
+    if (!cuRunning) return;
+    const cum = cuElapsed();
+    const prev = cuLaps.length ? cuLaps[cuLaps.length - 1].cumMs : 0;
+    cuLaps.push({ idx: cuLaps.length + 1, cumMs: cum, splitMs: cum - prev });
+    renderLapPanel();
+  }
+
+  function resetCU(){
+    cuRunning = false;
+    cancelAnimationFrame(rafCU);
+    if (cuPhase !== 'idle'){
+      const total = Math.max(0, cuElapsed());
+      cuLogCounter++;
+      const entry = { id: cuLogCounter, n: cuLogCounter, totalMs: total, laps: cuLaps.slice() };
+      cuLogs.push(entry);
+      if (cuLogs.length > 10) cuLogs.shift();
+      selectedLapId = entry.id;
+      renderCountupLogs();
+    }
+    cuPhase = 'idle';
+    cuBaseMs = 0;
+    cuLaps = [];
+    setStatusCU(null);
+    setSpaceSwitchCU(false);
+    cuHintRow.classList.remove('show');
+    startBtnCU.disabled = false;
+    startBtnCU.textContent = '開始';
+    pauseBtnCU.disabled = true;
+    lapBtnCU.disabled = true;
+    setCountupDigits(0);
+    renderLapPanel();
+  }
+
+  function getCurrentLapView(){
+    if (isLiveLapView()){
+      return { headerText: '進行中の記録のラップ', totalMs: cuElapsed(), laps: cuLaps };
+    }
+    const entry = cuLogs.find(e => e.id === selectedLapId) || cuLogs[cuLogs.length - 1];
+    if (!entry) return null;
+    return { headerText: '#'+entry.n+' のラップ', totalMs: entry.totalMs, laps: entry.laps };
+  }
+
+  function renderLapPanel(){
+    lapList.textContent = '';
+    const view = getCurrentLapView();
+    if (!view){
+      lapHeader.textContent = 'ラップ';
+      lapTotal.textContent = 'まだ記録がありません';
+      return;
+    }
+    lapHeader.textContent = view.headerText;
+    lapTotal.textContent = '全体: ' + fmtHMSCF(view.totalMs);
+    if (view.laps.length === 0){
+      const li = document.createElement('li');
+      li.className = 'lap-empty';
+      li.textContent = 'まだラップがありません';
+      lapList.appendChild(li);
+      return;
+    }
+    view.laps.forEach(l => {
+      const li = document.createElement('li');
+      li.className = 'lap-item';
+      const n = document.createElement('span'); n.className = 'lap-n'; n.textContent = 'Lap '+l.idx;
+      const sp = document.createElement('span'); sp.className = 'lap-split'; sp.textContent = '+'+fmtHMSCF(l.splitMs);
+      const cm = document.createElement('span'); cm.className = 'lap-cum'; cm.textContent = fmtHMSCF(l.cumMs);
+      li.append(n, sp, cm);
+      lapList.appendChild(li);
+    });
+  }
+
+  function cuEntryHeaderText(e){ return '#'+e.n+'  合計 '+fmtHMSCF(e.totalMs); }
+  function cuEntryLapsText(e){
+    if (!e.laps.length) return '  (ラップなし)';
+    return e.laps.map(l => '  Lap '+l.idx+'  +'+fmtHMSCF(l.splitMs)+'  (累計 '+fmtHMSCF(l.cumMs)+')').join('\n');
+  }
+  function cuEntryFullText(e){ return cuEntryHeaderText(e)+'\n'+cuEntryLapsText(e); }
+
+  function renderCountupLogs(){
+    cuLogList.textContent = '';
+    const sorted = cuLogs.slice().reverse();
+    cuLogEmpty.hidden = sorted.length > 0;
+    sorted.forEach((entry, idx) => {
+      const li = document.createElement('li');
+      li.className = 'log-item';
+      if (idx >= 5) li.hidden = !cuShowMore;
+      const n = document.createElement('span');
+      n.className = 'log-n'; n.textContent = '#'+entry.n;
+      const t = document.createElement('span');
+      t.className = 'log-time'; t.textContent = fmtHMSCF(entry.totalMs);
+      const lapBtn = document.createElement('button');
+      lapBtn.type = 'button'; lapBtn.textContent = 'ラップ';
+      lapBtn.addEventListener('click', () => { selectedLapId = entry.id; renderLapPanel(); });
+      const copyBtn = document.createElement('button');
+      copyBtn.type = 'button'; copyBtn.textContent = 'コピー';
+      copyBtn.addEventListener('click', () => copyText(cuEntryFullText(entry), copyBtn));
+      li.append(n, t, lapBtn, copyBtn);
+      cuLogList.appendChild(li);
+    });
+    if (sorted.length > 5){
+      cuLogMoreBtn.hidden = false;
+      cuLogMoreBtn.textContent = cuShowMore ? '過去のログを隠す' : ('過去のログを表示 (+'+Math.min(5, sorted.length-5)+')');
+    } else {
+      cuLogMoreBtn.hidden = true;
+    }
+  }
+
+  cuLogMoreBtn.addEventListener('click', () => {
+    cuShowMore = !cuShowMore;
+    renderCountupLogs();
+  });
+
+  copyLogsOnlyBtn.addEventListener('click', () => {
+    if (cuLogs.length === 0){ flashButton(copyLogsOnlyBtn, '記録なし'); return; }
+    const text = cuLogs.map(cuEntryHeaderText).join('\n');
+    copyText(text, copyLogsOnlyBtn);
+  });
+  copyLapsOnlyBtn.addEventListener('click', () => {
+    const view = getCurrentLapView();
+    if (!view){ flashButton(copyLapsOnlyBtn, '記録なし'); return; }
+    const lapsText = view.laps.length
+      ? view.laps.map(l => '  Lap '+l.idx+'  +'+fmtHMSCF(l.splitMs)+'  (累計 '+fmtHMSCF(l.cumMs)+')').join('\n')
+      : '  (ラップなし)';
+    const text = view.headerText+'\n全体: '+fmtHMSCF(view.totalMs)+'\n'+lapsText;
+    copyText(text, copyLapsOnlyBtn);
+  });
+  copyBothBtn.addEventListener('click', () => {
+    const logsText = cuLogs.length ? cuLogs.map(cuEntryHeaderText).join('\n') : '記録なし';
+    const view = getCurrentLapView();
+    const lapsText = view
+      ? view.headerText+'\n全体: '+fmtHMSCF(view.totalMs)+'\n'+(view.laps.length ? view.laps.map(l => '  Lap '+l.idx+'  +'+fmtHMSCF(l.splitMs)+'  (累計 '+fmtHMSCF(l.cumMs)+')').join('\n') : '  (ラップなし)')
+      : 'ラップ記録なし';
+    copyText(logsText+'\n\n'+lapsText, copyBothBtn);
+  });
+
+  startBtnCU.addEventListener('click', startCU);
+  pauseBtnCU.addEventListener('click', pauseCU);
+  lapBtnCU.addEventListener('click', lapCU);
+  resetBtnCU.addEventListener('click', resetCU);
+
+  setCountupDigits(0);
+  renderCountupLogs();
+  renderLapPanel();
+
+  /* ============================================================
+     keyboard logic (Space & Enter)
+  ============================================================ */
+  document.addEventListener('keydown', (e) => {
+    const activeTag = document.activeElement && document.activeElement.tagName;
+    if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
+
+    if (e.code === 'Space' || e.key === ' ') {
+      e.preventDefault();
+      if (appMode === 'countdown'){
+        if (!startBtnCD.disabled) startCD();
+        else if (!pauseBtnCD.disabled) pauseCD();
+      } else {
+        if (!startBtnCU.disabled) startCU();
+        else if (!pauseBtnCU.disabled) pauseCU();
+      }
+      return;
+    }
+
+    if (e.key === 'Enter') {
+      if (appMode === 'countup' && cuRunning) {
+        e.preventDefault();
+        lapCU();
+      }
+    }
+  });
+
+})();
+</script>
+
+</body>
+</html>
