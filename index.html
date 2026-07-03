@@ -176,6 +176,15 @@
   .lap-empty{ color:var(--muted); font-size:11px; text-align:center; padding:8px 0; }
   .lap-copy-row{ display:flex; gap:6px; margin-top:10px; flex-wrap:wrap; }
   .lap-copy-row button{ flex:1 1 auto; font-size:9px; padding:6px 6px; min-width:0; }
+
+  /* スマホ幅では左右の展開(時間 / 1/1000秒)が物理的に収まらないため、
+     このブレークポイント内でのみ折り返し・縮小させる。PC表示は上のルールのまま変更しない。 */
+  @media (max-width: 480px){
+    .set-row{ flex-wrap: wrap; row-gap: 10px; }
+    .field input{ width: 48px; font-size: 15px; padding: 7px 3px; }
+    .arrow-btn{ width: 30px; height: 40px; font-size: 13px; }
+    .side-field.open{ max-width: 70px; }
+  }
 </style>
 </head>
 <body>
@@ -193,7 +202,7 @@
       </div>
 
       <div class="display" id="displayCD">
-        <span class="digits" id="digitsCD">00:00:10</span><span class="ms" id="msCD">.00</span>
+        <span class="digits" id="digitsCD">00:00:10</span><span class="ms" id="msCD">.00</span><span class="ms fine" id="fineCD">.0</span>
       </div>
       <div class="total-elapsed" id="totalElapsedRow" hidden>合計経過 <span id="totalElapsedText">00:00:00.00</span></div>
 
@@ -469,6 +478,7 @@
   ============================================================ */
   const digitsCD = document.getElementById('digitsCD');
   const msCD = document.getElementById('msCD');
+  const fineCD = document.getElementById('fineCD');
   const displayCD = document.getElementById('displayCD');
   const statusDotCD = document.getElementById('statusDotCD');
   const totalElapsedRow = document.getElementById('totalElapsedRow');
@@ -521,11 +531,13 @@
     const p = msParts(ms);
     digitsCD.textContent = pad(p.hh,2)+':'+pad(p.mm,2)+':'+pad(p.ss,2);
     msCD.textContent = '.'+pad(p.cs,2);
+    fineCD.textContent = '.'+p.fine;
   }
   function setOvertimeDigits(ms){
     const p = msParts(ms);
     digitsCD.textContent = '-'+pad(p.hh,2)+':'+pad(p.mm,2)+':'+pad(p.ss,2);
     msCD.textContent = '.'+pad(p.cs,2);
+    fineCD.textContent = '.'+p.fine;
   }
   function refreshIdleDisplayCD(){
     if (phaseCD === 'idle') setCountdownDigits(confirmedTotalMsCD());
@@ -838,21 +850,23 @@
 
   function pauseCU(){
     if (!cuRunning) return;
+    const frozenElapsed = cuElapsed(); // cuRunning がまだ true のうちに確定させる
     cuRunning = false;
     cancelAnimationFrame(rafCU);
-    cuBaseMs = cuElapsed();
+    cuBaseMs = frozenElapsed;
+    setCountupDigits(cuBaseMs);
     cuPhase = 'paused';
     setStatusCU(null);
     setSpaceSwitchCU(false);
-    cuHintRow.classList.remove('show');
+    cuHintRow.classList.add('show');
     startBtnCU.disabled = false;
     startBtnCU.textContent = '再開';
     pauseBtnCU.disabled = true;
-    lapBtnCU.disabled = true;
+    lapBtnCU.disabled = false;
   }
 
   function lapCU(){
-    if (!cuRunning) return;
+    if (!isLiveLapView()) return;
     const cum = cuElapsed();
     const prev = cuLaps.length ? cuLaps[cuLaps.length - 1].cumMs : 0;
     cuLaps.push({ idx: cuLaps.length + 1, cumMs: cum, splitMs: cum - prev });
@@ -1015,7 +1029,7 @@
     }
 
     if (e.key === 'Enter') {
-      if (appMode === 'countup' && cuRunning) {
+      if (appMode === 'countup' && isLiveLapView()) {
         e.preventDefault();
         lapCU();
       }
