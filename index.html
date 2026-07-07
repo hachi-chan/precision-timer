@@ -3,11 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none';">
+<meta name="description" content="1/1000秒まで設定できる精密カウントダウンタイマーと、ラップ・記録ログ機能付きのストップウォッチ。ブラウザだけで動作します。">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; frame-src 'none'; worker-src 'none'; manifest-src 'none';">
 <meta name="referrer" content="no-referrer">
 <title>精密タイマー / ストップウォッチ</title>
 <link rel="icon" href="favicon.ico" type="image/x-icon">
 <meta name="google-site-verification" content="oFncgWtCLOzj-Yo2gxMK3aIIlwCevwNL-ssu0M7-f9Y" />
+
 <style>
   :root{
     --bg: #0B0E0C;
@@ -59,8 +61,10 @@
     box-shadow: 0 0 0 1px #000, 0 20px 60px rgba(0,0,0,0.55);
   }
 
+  .app-title{ margin:0 0 20px; text-align:center; font-size: 13px; letter-spacing: 0.2em; color: var(--muted); text-transform: uppercase; font-weight: normal; }
+
   .label-row{ display:flex; justify-content:space-between; align-items:center; margin-bottom: 18px; }
-  .eyebrow{ font-size: 11px; letter-spacing: 0.22em; color: var(--muted); text-transform: uppercase; }
+  .eyebrow{ margin:0; font-size: 11px; font-weight: normal; letter-spacing: 0.22em; color: var(--muted); text-transform: uppercase; }
 
   .status-dot{ width: 8px; height:8px; border-radius:50%; background: var(--muted); transition: all .15s ease; }
   .status-dot.running{ background: var(--led); box-shadow: 0 0 8px var(--led), 0 0 16px var(--led); }
@@ -190,6 +194,8 @@
 <body>
 <div class="app" id="appContainer">
 
+  <h1 class="app-title">精密タイマー / ストップウォッチ</h1>
+
   <div class="mode-switch-row">
     <button id="modeToggleBtn" type="button">カウントアップモードに切替</button>
   </div>
@@ -197,8 +203,8 @@
   <div class="view cd-wrap" id="countdownView">
     <div class="instrument">
       <div class="label-row">
-        <span class="eyebrow">Precision Countdown</span>
-        <span class="status-dot" id="statusDotCD"></span>
+        <h2 class="eyebrow">Precision Countdown</h2>
+        <span class="status-dot" id="statusDotCD" aria-hidden="true"></span>
       </div>
 
       <div class="display" id="displayCD">
@@ -249,7 +255,7 @@
         <div class="space-pill">
           <span class="space-key">SPACE</span>
           <span>開始 / 一時停止</span>
-          <div class="space-switch" id="spaceSwitchCD"><div class="knob"></div></div>
+          <div class="space-switch" id="spaceSwitchCD" aria-hidden="true"><div class="knob"></div></div>
         </div>
       </div>
 
@@ -273,8 +279,8 @@
   <div class="view cu-wrap" id="countupView" hidden>
     <div class="instrument">
       <div class="label-row">
-        <span class="eyebrow">Precision Stopwatch</span>
-        <span class="status-dot" id="statusDotCU"></span>
+        <h2 class="eyebrow">Precision Stopwatch</h2>
+        <span class="status-dot" id="statusDotCU" aria-hidden="true"></span>
       </div>
 
       <div class="display" id="displayCU">
@@ -294,7 +300,7 @@
         <div class="space-pill">
           <span class="space-key">SPACE</span>
           <span>開始 / 一時停止</span>
-          <div class="space-switch" id="spaceSwitchCU"><div class="knob"></div></div>
+          <div class="space-switch" id="spaceSwitchCU" aria-hidden="true"><div class="knob"></div></div>
         </div>
       </div>
     </div>
@@ -389,6 +395,13 @@
         playBeepAt(t); t += beepDur + gapGroup;
       }
     }catch(e){ /* fail silently, timer still works without sound */ }
+  }
+  function playLapBeep(){
+    try{
+      unlockAudio();
+      if (!audioCtx) return;
+      playBeepAt(audioCtx.currentTime + 0.01);
+    }catch(e){ /* fail silently, lap still records without sound */ }
   }
 
   function fallbackCopy(text){
@@ -563,14 +576,14 @@
         return;
       }
       setCountdownDigits(left);
-      rafCD = requestAnimationFrame(tickCD);
+      rafCD = setTimeout(tickCD, 30);
       return;
     }
     if (phaseCD === 'overtime'){
       const elapsed = now - overtimeStart;
       setOvertimeDigits(elapsed);
       totalElapsedText.textContent = fmtHMSC(totalMsAtStart + elapsed);
-      rafCD = requestAnimationFrame(tickCD);
+      rafCD = setTimeout(tickCD, 30);
     }
   }
 
@@ -583,7 +596,7 @@
       displayCD.classList.add('overtime');
       totalElapsedRow.hidden = false;
       totalElapsedText.textContent = fmtHMSC(totalMsAtStart);
-      rafCD = requestAnimationFrame(tickCD);
+      rafCD = setTimeout(tickCD, 30);
     } else {
       finishStaticCD();
     }
@@ -591,7 +604,7 @@
 
   function finishStaticCD(){
     cdRunning = false;
-    cancelAnimationFrame(rafCD);
+    clearTimeout(rafCD);
     phaseCD = 'stopped';
     setStatusCD('alert');
     setSpaceSwitchCD(false);
@@ -684,13 +697,13 @@
     startBtnCD.disabled = true;
     pauseBtnCD.disabled = false;
     pauseBtnCD.textContent = '一時停止';
-    rafCD = requestAnimationFrame(tickCD);
+    rafCD = setTimeout(tickCD, 30);
   }
 
   function pauseCD(){
     if (!cdRunning) return;
     cdRunning = false;
-    cancelAnimationFrame(rafCD);
+    clearTimeout(rafCD);
     const now = performance.now();
     if (phaseCD === 'countdown'){
       remainingMs = Math.max(0, endTime - now);
@@ -705,10 +718,11 @@
   }
 
   function resetCD(){
+    const elapsedAtReset = computeElapsedForLogCD(); // cdRunning を倒す前に確定させる
     cdRunning = false;
-    cancelAnimationFrame(rafCD);
+    clearTimeout(rafCD);
     if (phaseCD !== 'idle'){
-      addCountdownLog(computeElapsedForLogCD());
+      addCountdownLog(elapsedAtReset);
     }
     phaseCD = 'idle';
     remainingMs = 0;
@@ -821,7 +835,7 @@
     const e = cuElapsed();
     setCountupDigits(e);
     if (isLiveLapView()) lapTotal.textContent = '全体: ' + fmtHMSCF(e);
-    rafCU = requestAnimationFrame(tickCU);
+    rafCU = setTimeout(tickCU, 30);
   }
 
   function startCU(){
@@ -845,14 +859,14 @@
     pauseBtnCU.disabled = false;
     pauseBtnCU.textContent = '一時停止';
     lapBtnCU.disabled = false;
-    rafCU = requestAnimationFrame(tickCU);
+    rafCU = setTimeout(tickCU, 30);
   }
 
   function pauseCU(){
     if (!cuRunning) return;
     const frozenElapsed = cuElapsed(); // cuRunning がまだ true のうちに確定させる
     cuRunning = false;
-    cancelAnimationFrame(rafCU);
+    clearTimeout(rafCU);
     cuBaseMs = frozenElapsed;
     setCountupDigits(cuBaseMs);
     cuPhase = 'paused';
@@ -867,6 +881,7 @@
 
   function lapCU(){
     if (!isLiveLapView()) return;
+    playLapBeep();
     const cum = cuElapsed();
     const prev = cuLaps.length ? cuLaps[cuLaps.length - 1].cumMs : 0;
     cuLaps.push({ idx: cuLaps.length + 1, cumMs: cum, splitMs: cum - prev });
@@ -874,10 +889,11 @@
   }
 
   function resetCU(){
+    const elapsedAtReset = cuElapsed(); // cuRunning を倒す前に確定させる
     cuRunning = false;
-    cancelAnimationFrame(rafCU);
+    clearTimeout(rafCU);
     if (cuPhase !== 'idle'){
-      const total = Math.max(0, cuElapsed());
+      const total = Math.max(0, elapsedAtReset);
       cuLogCounter++;
       const entry = { id: cuLogCounter, n: cuLogCounter, totalMs: total, laps: cuLaps.slice() };
       cuLogs.push(entry);
@@ -936,12 +952,11 @@
     });
   }
 
+  function lapLineText(l){ return '  Lap '+l.idx+'  +'+fmtHMSCF(l.splitMs)+'  (累計 '+fmtHMSCF(l.cumMs)+')'; }
+  function lapsBlockText(laps){ return laps.length ? laps.map(lapLineText).join('\n') : '  (ラップなし)'; }
   function cuEntryHeaderText(e){ return '#'+e.n+'  合計 '+fmtHMSCF(e.totalMs); }
-  function cuEntryLapsText(e){
-    if (!e.laps.length) return '  (ラップなし)';
-    return e.laps.map(l => '  Lap '+l.idx+'  +'+fmtHMSCF(l.splitMs)+'  (累計 '+fmtHMSCF(l.cumMs)+')').join('\n');
-  }
-  function cuEntryFullText(e){ return cuEntryHeaderText(e)+'\n'+cuEntryLapsText(e); }
+  function cuEntryFullText(e){ return cuEntryHeaderText(e)+'\n'+lapsBlockText(e.laps); }
+  function lapViewText(view){ return view.headerText+'\n全体: '+fmtHMSCF(view.totalMs)+'\n'+lapsBlockText(view.laps); }
 
   function renderCountupLogs(){
     cuLogList.textContent = '';
@@ -985,18 +1000,12 @@
   copyLapsOnlyBtn.addEventListener('click', () => {
     const view = getCurrentLapView();
     if (!view){ flashButton(copyLapsOnlyBtn, '記録なし'); return; }
-    const lapsText = view.laps.length
-      ? view.laps.map(l => '  Lap '+l.idx+'  +'+fmtHMSCF(l.splitMs)+'  (累計 '+fmtHMSCF(l.cumMs)+')').join('\n')
-      : '  (ラップなし)';
-    const text = view.headerText+'\n全体: '+fmtHMSCF(view.totalMs)+'\n'+lapsText;
-    copyText(text, copyLapsOnlyBtn);
+    copyText(lapViewText(view), copyLapsOnlyBtn);
   });
   copyBothBtn.addEventListener('click', () => {
     const logsText = cuLogs.length ? cuLogs.map(cuEntryHeaderText).join('\n') : '記録なし';
     const view = getCurrentLapView();
-    const lapsText = view
-      ? view.headerText+'\n全体: '+fmtHMSCF(view.totalMs)+'\n'+(view.laps.length ? view.laps.map(l => '  Lap '+l.idx+'  +'+fmtHMSCF(l.splitMs)+'  (累計 '+fmtHMSCF(l.cumMs)+')').join('\n') : '  (ラップなし)')
-      : 'ラップ記録なし';
+    const lapsText = view ? lapViewText(view) : 'ラップ記録なし';
     copyText(logsText+'\n\n'+lapsText, copyBothBtn);
   });
 
@@ -1010,8 +1019,12 @@
   renderLapPanel();
 
   /* ============================================================
-     keyboard logic (Space & Enter)
+     visibility / keyboard (Space & Enter)
   ============================================================ */
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) unlockAudio();
+  });
+
   document.addEventListener('keydown', (e) => {
     const activeTag = document.activeElement && document.activeElement.tagName;
     if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
